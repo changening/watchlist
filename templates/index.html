@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{{ name }}的电影清单</title>
+    <title>{{ user.name }}的电影清单</title>
     <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='CSS/style.css') }}" type="text/css">
 </head>
 <body>
     <h2>
-        <img alt="see" class="see" src="{{ url_for('static', filename='images/see.png') }}">{{ name }}的电影清单
+        <img alt="see" class="see" src="{{ url_for('static', filename='images/see.png') }}">{{ user.name }}的电影清单
     </h2>
     <p>{{ movies|length }} Titles</p>
     <ul class="movie-list">
