@@ -3,8 +3,9 @@ import sys
 import click
 
 from flask import Flask,render_template, request, url_for, redirect, flash
-from markupsafe import escape
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import login_user, login_required, logout_user, LoginManager, current_user, UserMixin
 
 
 # SQLite URI 兼容配置
@@ -21,10 +22,28 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # 关闭对模型修改的
 # 在扩展类实例化前加载配置
 db = SQLAlchemy(app)
 
+login_manager = LoginManager(app)  # 实例化扩展类
+# 初始化 Flask-Login
+@login_manager.user_loader
+def load_user(user_id):  # 创建用户加载回调函数，接受用户 ID 作为参数
+    user = User.query.get(int(user_id))  # 用 ID 作为 User 模型的主键查询对应的用户
+    return user  # 返回用户对象
+
+login_manager.login_view = 'login'
+
+
 # 表名将会是 user（自动生成，小写处理）
-class User(db.Model):
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(20))
+    username = db.Column(db.String(20))  # 用户名
+    password_hash = db.Column(db.String(128))  # 密码散列值
+
+    def set_password(self, password): # 用来设置密码的方法，接受密码作为参数
+        self.password_hash = generate_password_hash(password) # 将生成的密码保持到对应字段
+
+    def validate_password(self, password): # 用于验证密码的方法，接受密码作为参数
+        return check_password_hash(self.password_hash, password) # 返回布尔值
 
 
 # 表名将会是 movie
@@ -74,6 +93,29 @@ def forge():
     click.echo('data were created')
 
 
+# 使用 click.option() 装饰器设置的两个选项分别用来在本地终端接受输入用户名和密码。
+@app.cli.command()
+@click.option('--username', prompt=True, help='The username used to login.')
+@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='The password used to login.')
+def admin(username, password):
+    # create user
+    db.create_all()
+    user = User.query.first()
+    if user is not None:
+        click.echo('Updating user...')
+        user.username = username
+        user.set_password(password) # 设置密码
+
+    else:
+        click.echo('Creating user...')
+        user = User(username=username, name='Admin')
+        user.set_password(password)  # 设置密码
+        db.session.add(user)
+
+    db.session.commit()  # 提交数据库会话
+    click.echo('Done.')
+
+
 # 上下文处理函数
 @app.context_processor
 def inject_user():
@@ -85,6 +127,8 @@ def inject_user():
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
+        if not current_user.is_authenticated:  # 如果当前用户未认证
+            return redirect(url_for('index'))  # 重定向到主页
         # 获取表单数据
         title = request.form.get('title')
         year = request.form.get('year')
@@ -104,6 +148,7 @@ def index():
 
 # 编辑电影条目
 @app.route('/movie/edit/<int:movie_id>', methods=['GET', 'POST'])
+@login_required  # 登录保护
 def edit(movie_id):
     # 使用了get_or_404()方法，它会返回对应主键的记录，如果没有找到，则返回404错误响应
     movie = Movie.query.get_or_404(movie_id)
@@ -132,6 +177,7 @@ def page_not_found(e):  # 接受异常对象作为参数
 
 # 删除电影条目
 @app.route('/movie/delote/<int:movie_id>', methods=['POST']) # 限定只接受POST请求
+@login_required  # 登录保护
 def delete(movie_id):
     movie = Movie.query.get_or_404(movie_id) # 获取电影记录
     db.session.delete(movie)
@@ -139,3 +185,53 @@ def delete(movie_id):
     flash('Item deleted.')
     return redirect(url_for('index')) # 重定向回主页
 
+
+# 用户登录试图函数，并判断密码是否正确
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username or not password:
+            flash('Invalid input.')
+            return redirect(url_for('login'))
+
+        user = User.query.first()
+
+        if username == user.username and user.validate_password(password): # 验证用户名和密码是否一致
+            login_user(user) # 登入用户
+            flash('login success.')
+            return redirect(url_for('index'))   # 重定向到主页
+        flash('Invalid username or password.')  # 如果验证失败，显示错误消息
+        return redirect(url_for('login'))       # 重定向回登录页面
+
+    return render_template('login.html')
+
+
+# 登出
+@app.route('/logout')
+@login_required # 用于视图保护
+def logout():
+    logout_user() # 登出用户
+    flash('goodbye.')
+    return redirect(url_for('index'))
+
+
+# 设置用户名字
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    if request.method == 'POST':
+        name = request.form['name']
+
+        if not name or len(name) > 20:
+            flash('Invalid input.')
+            return redirect(url_for('settings'))
+
+        current_user.name = name
+        db.session.commit()
+        flash('Settings updated.')
+        return redirect(url_for('index'))
+
+    return render_template('settings.html')
