@@ -2,10 +2,10 @@ import os
 import sys
 import click
 
-from flask import Flask,render_template
+from flask import Flask,render_template, request, url_for, redirect, flash
 from markupsafe import escape
-from flask import url_for
 from flask_sqlalchemy import SQLAlchemy
+
 
 # SQLite URI 兼容配置
 WIN = sys.platform.startswith('win')
@@ -15,6 +15,7 @@ else:
     prefix = 'sqlite:////'  # 否则使用四个斜线
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'dev' # 设置签名所需的密钥
 app.config['SQLALCHEMY_DATABASE_URI'] = prefix + os.path.join(app.root_path, 'data.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # 关闭对模型修改的监控
 # 在扩展类实例化前加载配置
@@ -64,6 +65,7 @@ def forge():
     # 定义user的名字后提交到数据库
     user = User(name=name)
     db.session.add(user)
+
     for m in movies:
         movie = Movie(title=m['title'], year=m['year'])
         db.session.add(movie)
@@ -72,22 +74,68 @@ def forge():
     click.echo('data were created')
 
 
-@app.route('/')
-def index():
+# 上下文处理函数
+@app.context_processor
+def inject_user():
     user = User.query.first()
+    return dict(user=user)
+
+
+# 处理表单数据
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        # 获取表单数据
+        title = request.form.get('title')
+        year = request.form.get('year')
+        # 验证数据
+        if not title or not year or len(year) > 4 or len(title) > 60 or year < 1900:
+            flash('Invalid input') # 显示错误提示
+            return redirect(url_for('index')) # 重定向回主页
+        # 保存表单数据到数据库
+        movie = Movie(title=title, year=year) # 创建记录
+        db.session.add(movie) # 添加到数据库
+        db.session.commit()   # 提交数据会话
+        return redirect(url_for('index')) # 重定向回主页
+
     movies = Movie.query.all()
-    return render_template('index.html', user=user, movies=movies)
+    return render_template('index.html', movies=movies)
 
 
-@app.route('/user/<name>')
-def user_page(name):
-    return f'user: {escape(name)}'
+# 编辑电影条目
+@app.route('/movie/edit/<int:movie_id>', methods=['GET', 'POST'])
+def edit(movie_id):
+    # 使用了get_or_404()方法，它会返回对应主键的记录，如果没有找到，则返回404错误响应
+    movie = Movie.query.get_or_404(movie_id)
+    if request.method == 'POST':
+        # 获取表单数据
+        title = request.form.get('title')
+        year = request.form.get('year')
+        # 验证数据
+        if not title or not year or len(year) > 4 or len(title) > 60 or year < 1900:
+            flash('Invalid input') # 显示错误提示
+            return redirect(url_for('edit', movie_id=movie_id)) # 重定向回对应的编辑页面
+        # 保存表单数据到数据库
+        movie.title = title # 更新标题
+        movie.year = year   # 更新年份
+        db.session.commit()   # 提交数据会话
+        return redirect(url_for('index')) # 重定向回主页
+
+    return render_template('index.html', movie=movie)
 
 
-@app.route('/test')
-def test_url_for():
-    print(url_for('hello'))
-    print(url_for('user_page', name='greyli'))  # 输出：/user/greyli
-    # 下面这个调用传入了多余的关键字参数，它们会被作为查询字符串附加到 URL 后面。
-    print(url_for('test_url_for', num=2))  # 输出：/test?num=2
-    return '你好呀'
+# 错误处理函数
+@app.errorhandler(404)  # 传入要处理的错误代码
+def page_not_found(e):  # 接受异常对象作为参数
+    return render_template('404.html'), 404  # 返回模板和状态码
+
+
+# 删除电影条目
+@app.route('/movie/delote/<int:movie_id>', methods=['POST']) # 限定只接受POST请求
+def delete(movie_id):
+    movie = Movie.query.get_or_404(movie_id) # 获取电影记录
+    db.session.delete(movie)
+    db.session.commit()
+    flash('Item deleted.')
+    return redirect(url_for('index')) # 重定向回主页
+
