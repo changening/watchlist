@@ -15,7 +15,7 @@ def index():
         title = request.form.get('title')
         year = request.form.get('year')
         # 验证数据
-        if not title or not year or len(year) > 4 or len(title) > 60 or year < 1900:
+        if not title or not year or len(year) > 4 or len(title) > 60 or int(year) < 1900:
             flash('Invalid input') # 显示错误提示
             return redirect(url_for('index')) # 重定向回主页
         # 保存表单数据到数据库
@@ -39,7 +39,7 @@ def edit(movie_id):
         title = request.form.get('title')
         year = request.form.get('year')
         # 验证数据
-        if not title or not year or len(year) > 4 or len(title) > 60 or year < 1900:
+        if not title or not year or len(year) > 4 or len(title) > 60 or nt(year) < 1900:
             flash('Invalid input') # 显示错误提示
             return redirect(url_for('edit', movie_id=movie_id)) # 重定向回对应的编辑页面
         # 保存表单数据到数据库
